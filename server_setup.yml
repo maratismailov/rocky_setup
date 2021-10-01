@@ -1,0 +1,177 @@
+#################################################
+# Initial Server Setup
+# ansible-playbook -i hosts -u geonode --ask-pass --ask-become-pass server_setup.yml
+#################################################
+---
+- hosts: all
+  vars_files:
+    - vars/default.yml
+
+  tasks:
+
+
+    - name: setup public ip
+      copy:
+        dest: "/etc/sysconfig/network-scripts/ifcfg-eth1"
+        force: yes
+        content: |
+          TYPE=Ethernet
+          PROXY_METHOD=none
+          BROWSER_ONLY=no
+          BOOTPROTO=static
+          IPADDR=178.217.168.244
+          NETMASK=255.255.255.192
+          GATEWAY=178.217.169.193
+          DNS1=8.8.8.8
+          DEFROUTE=no
+          IPV4_FAILURE_FATAL=no
+          NAME=eth1
+          DEVICE=eth1
+          ONBOOT=yes
+
+    - name: setup default route
+      copy:
+        dest: "/etc/sysconfig/network-scripts/route-eth1"
+        force: yes
+        content: |
+          default via 178.217.169.193 dev eth1
+
+    - name: update packages
+      yum:
+        name: '*'
+        state: latest
+      register: yum_result
+      async: 1000
+      poll: 30
+
+    - name: Install Prerequisites
+      yum: name={{ item }} update_cache=yes state=latest
+      loop: [ 'curl', 'git', 'policycoreutils-python-utils', 'postfix', 'mailx' ]
+
+# Sudo Group Setup
+
+    - name: Allow 'wheel' group to have passwordless sudo
+      lineinfile:
+        path: /etc/sudoers
+        state: present
+        regexp: '^%wheel'
+        line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+        validate: '/usr/sbin/visudo -cf %s'
+
+# User + Key Setup
+
+    # - name: Create a new regular user with sudo privileges
+    #   user:
+    #     name: "{{ create_user }}"
+    #     state: present
+    #     groups: wheel
+    #     append: true
+    #     create_home: true
+    #     shell: /bin/bash
+
+    - name: Set authorized key for remote user
+      authorized_key:
+        user: "{{ create_user }}"
+        state: present
+        key: "{{ copy_local_key }}"
+
+    # - name: Set authorized key for remote user
+    #   authorized_key:
+    #     user: "{{ create_user }}"
+    #     state: present
+    #     key: "{{ additional_key }}"
+
+    - name: Disable password authentication for root
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin prohibit-password'
+
+    - name: Disable any password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+
+    - name: Enable pubkey authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        regexp: '^#?PubkeyAuthentication'
+        line: 'PubkeyAuthentication yes'
+
+    - name: Allow only specified user to login via ssh
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        insertafter: EOF
+        line: 'AllowUsers {{ create_user }}'
+
+    - name: Change ssh port
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        regexp: '^#?Port 22'
+        line: 'Port {{ ssh_port }}'
+
+    - name: Allow sshd to listen on tcp port 8991
+      seport:
+        ports: '{{ ssh_port }}'
+        proto: tcp
+        setype: ssh_port_t
+        state: present
+
+# firewalld Setup
+    - name: firewalld - Allow SSH connections
+      firewalld:
+        port: '{{ ssh_port }}/tcp'
+        state: enabled
+
+    - name: firewalld - disable 22 port
+      firewalld:
+        service: ssh
+        state: disabled
+
+    - name: Restart ssh
+      service:
+        name: sshd
+        state: restarted
+
+ # Mail sending setup
+
+    # - name: Edit postfix config
+    #   lineinfile:
+    #     path: /etc/postfix/main.cf
+    #     regexp: inet_interfaces = all
+    #     line: inet_interfaces = localhost
+
+    - name: Edit postfix config
+      lineinfile:
+        path: /etc/postfix/main.cf
+        regexp: '^myhostname = host.domain.tld'
+        line: myhostname = geonode.caiag.kg
+
+    - name: Edit postfix config
+      lineinfile:
+        path: /etc/postfix/main.cf
+        regexp: '^myorigin = $myhostname'
+        line: myorigin = $myhostname
+
+    - name: Edit postfix config
+      lineinfile:
+        path: /etc/postfix/main.cf
+        regexp: '^mydestination = $myhostname, geonode.caiag.kg, localhost.$mydomain, localhost'
+        line: myorigin = $myhostname
+
+    - name: enable postfix
+      service:
+        name: postfix
+        state: started
+        enabled: yes
+
+    - name: Restart ssh
+      service:
+        name: sshd
+        state: restarted

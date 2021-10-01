@@ -1,0 +1,8 @@
+---
+create_user: geonode
+copy_local_key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_ed25519.pub') }}"
+additional_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPPIc3EI3XvgtauPouUEwVGAY0hQK6O5eD5arZ85Rpln marat.ismailov889@gmail.com"
+disable_default: true
+ansible_ssh_private_key_file: "~/.ssh/id_ed25519"
+ansible_become: true
+ssh_port: 8888
